@@ -6,15 +6,19 @@
 
 namespace ore_xccy_curve {
 
+//=============================================================================
+// XCCYMarketData implementation
+//=============================================================================
+
 std::string XCCYMarketData::ccy_pair() const {
-    std::string base = fx_base_ccy.value_or(foreign_ccy.ccy);
-    std::string quote = (base == foreign_ccy.ccy) ? domestic_ccy.ccy : foreign_ccy.ccy;
+    std::string base = fx_base_ccy.value_or(foreign_ccy);
+    std::string quote = (base == foreign_ccy) ? domestic_ccy : foreign_ccy;
     return base + quote;
 }
 
 bool XCCYMarketData::is_fx_base_domestic() const {
-    std::string base = fx_base_ccy.value_or(foreign_ccy.ccy);
-    return base == domestic_ccy.ccy;
+    std::string base = fx_base_ccy.value_or(foreign_ccy);
+    return base == domestic_ccy;
 }
 
 double XCCYMarketData::get_forward_rate(const std::string& tenor) const {
@@ -37,8 +41,7 @@ double XCCYMarketData::get_basis_spread_bps(const std::string& tenor) const {
 
 void XCCYMarketData::print_summary() const {
     std::cout << "\n" << std::string(60, '=') << "\n";
-    std::cout << ccy_pair() << " Market Data Summary - "
-              << valuation_date << "\n";
+    std::cout << ccy_pair() << " Market Data Summary - " << valuation_date << "\n";
     std::cout << std::string(60, '=') << "\n";
     std::cout << "\nFX Spot: " << std::fixed << std::setprecision(4) << fx_spot << "\n";
 
@@ -63,7 +66,59 @@ void XCCYMarketData::print_summary() const {
     std::cout << "\n";
 }
 
-// Static currency configurations
+//=============================================================================
+// ConventionsFactory implementation
+//=============================================================================
+
+const std::map<std::string, CurrencyConventions>& ConventionsFactory::get_currency_conventions() {
+    static std::map<std::string, CurrencyConventions> conventions = {
+        {"USD", CurrencyConventions("USD", "SOFR", "US-FederalReserve", "Actual360")},
+        {"GBP", CurrencyConventions("GBP", "SONIA", "UK-Exchange", "Actual365Fixed")},
+        {"EUR", CurrencyConventions("EUR", "ESTR", "TARGET", "Actual360")},
+        {"JPY", CurrencyConventions("JPY", "TONAR", "Japan", "Actual365Fixed")},
+        {"CHF", CurrencyConventions("CHF", "SARON", "Switzerland", "Actual360")},
+        {"AUD", CurrencyConventions("AUD", "AONIA", "Australia", "Actual365Fixed")},
+        {"CAD", CurrencyConventions("CAD", "CORRA", "Canada", "Actual365Fixed")},
+    };
+    return conventions;
+}
+
+OISLegConventions ConventionsFactory::get_default_leg_conventions(const std::string& ccy) {
+    // Default OIS leg conventions - can be customized per currency if needed
+    // Currently all currencies use the same defaults
+    return OISLegConventions("3M", 2, 2, std::nullopt, 2, false, false);
+}
+
+XCCYConventions ConventionsFactory::create_xccy_conventions(
+    const std::string& domestic_ccy,
+    const std::string& foreign_ccy
+) {
+    const auto& ccy_convs = get_currency_conventions();
+
+    auto dom_it = ccy_convs.find(domestic_ccy);
+    auto fgn_it = ccy_convs.find(foreign_ccy);
+
+    if (dom_it == ccy_convs.end()) {
+        throw std::runtime_error("Unknown domestic currency: " + domestic_ccy);
+    }
+    if (fgn_it == ccy_convs.end()) {
+        throw std::runtime_error("Unknown foreign currency: " + foreign_ccy);
+    }
+
+    return XCCYConventions(
+        dom_it->second,
+        fgn_it->second,
+        get_default_leg_conventions(domestic_ccy),
+        get_default_leg_conventions(foreign_ccy),
+        2  // settlement days
+    );
+}
+
+//=============================================================================
+// MarketDataFactory implementation
+//=============================================================================
+
+// Legacy currency configs (for backwards compatibility)
 const std::map<std::string, CurrencyConfig>& MarketDataFactory::get_currency_configs() {
     static std::map<std::string, CurrencyConfig> configs = {
         {"USD", CurrencyConfig("USD", "SOFR", "US-FederalReserve", "Actual360", "3M", 2, 2, std::nullopt, 2)},
@@ -77,18 +132,17 @@ const std::map<std::string, CurrencyConfig>& MarketDataFactory::get_currency_con
     return configs;
 }
 
-XCCYMarketData MarketDataFactory::create_gbpusd(const QuantLib::Date& val_date) {
+// Pure market data factories (quotes only)
+XCCYMarketData MarketDataFactory::create_gbpusd_quotes(const QuantLib::Date& val_date) {
     QuantLib::Date valuation_date = val_date;
     if (valuation_date == QuantLib::Date()) {
         valuation_date = QuantLib::Date(15, QuantLib::January, 2024);
     }
 
-    const auto& configs = get_currency_configs();
-
     XCCYMarketData data;
     data.valuation_date = valuation_date;
-    data.domestic_ccy = configs.at("USD");
-    data.foreign_ccy = configs.at("GBP");
+    data.domestic_ccy = "USD";
+    data.foreign_ccy = "GBP";
     data.fx_spot = 1.2750;
     data.fx_base_ccy = std::nullopt;  // GBP is FX base (default)
 
@@ -105,18 +159,16 @@ XCCYMarketData MarketDataFactory::create_gbpusd(const QuantLib::Date& val_date) 
     return data;
 }
 
-XCCYMarketData MarketDataFactory::create_eurusd(const QuantLib::Date& val_date) {
+XCCYMarketData MarketDataFactory::create_eurusd_quotes(const QuantLib::Date& val_date) {
     QuantLib::Date valuation_date = val_date;
     if (valuation_date == QuantLib::Date()) {
         valuation_date = QuantLib::Date(15, QuantLib::January, 2024);
     }
 
-    const auto& configs = get_currency_configs();
-
     XCCYMarketData data;
     data.valuation_date = valuation_date;
-    data.domestic_ccy = configs.at("USD");
-    data.foreign_ccy = configs.at("EUR");
+    data.domestic_ccy = "USD";
+    data.foreign_ccy = "EUR";
     data.fx_spot = 1.0850;
     data.fx_base_ccy = std::nullopt;  // EUR is FX base (default)
 
@@ -133,18 +185,16 @@ XCCYMarketData MarketDataFactory::create_eurusd(const QuantLib::Date& val_date) 
     return data;
 }
 
-XCCYMarketData MarketDataFactory::create_usdjpy(const QuantLib::Date& val_date) {
+XCCYMarketData MarketDataFactory::create_usdjpy_quotes(const QuantLib::Date& val_date) {
     QuantLib::Date valuation_date = val_date;
     if (valuation_date == QuantLib::Date()) {
         valuation_date = QuantLib::Date(15, QuantLib::January, 2024);
     }
 
-    const auto& configs = get_currency_configs();
-
     XCCYMarketData data;
     data.valuation_date = valuation_date;
-    data.domestic_ccy = configs.at("USD");
-    data.foreign_ccy = configs.at("JPY");
+    data.domestic_ccy = "USD";
+    data.foreign_ccy = "JPY";
     data.fx_spot = 148.50;
     data.fx_base_ccy = "USD";  // USD is FX base (unlike GBPUSD)
 
@@ -159,6 +209,34 @@ XCCYMarketData MarketDataFactory::create_usdjpy(const QuantLib::Date& val_date) 
     };
 
     return data;
+}
+
+// Legacy factories (return quotes + conventions bundled)
+MarketDataFactory::LegacyXCCYMarketData MarketDataFactory::create_gbpusd(
+    const QuantLib::Date& valuation_date
+) {
+    LegacyXCCYMarketData result;
+    result.quotes = create_gbpusd_quotes(valuation_date);
+    result.conventions = ConventionsFactory::create_xccy_conventions("USD", "GBP");
+    return result;
+}
+
+MarketDataFactory::LegacyXCCYMarketData MarketDataFactory::create_eurusd(
+    const QuantLib::Date& valuation_date
+) {
+    LegacyXCCYMarketData result;
+    result.quotes = create_eurusd_quotes(valuation_date);
+    result.conventions = ConventionsFactory::create_xccy_conventions("USD", "EUR");
+    return result;
+}
+
+MarketDataFactory::LegacyXCCYMarketData MarketDataFactory::create_usdjpy(
+    const QuantLib::Date& valuation_date
+) {
+    LegacyXCCYMarketData result;
+    result.quotes = create_usdjpy_quotes(valuation_date);
+    result.conventions = ConventionsFactory::create_xccy_conventions("USD", "JPY");
+    return result;
 }
 
 } // namespace ore_xccy_curve

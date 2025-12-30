@@ -119,24 +119,34 @@ QuantLib::DayCounter DayCountFactory::create(const std::string& day_count_name) 
     return it->second();
 }
 
-// OISCurveBuilder implementation
+// OISCurveBuilder implementation - new constructor with separated types
+OISCurveBuilder::OISCurveBuilder(
+    const QuantLib::Date& eval_date,
+    const CurrencyConventions& ccy_conv,
+    const std::vector<std::pair<std::string, double>>& ois_rates,
+    QuantLib::Natural settlement_days
+) : eval_date_(eval_date),
+    ccy_conv_(ccy_conv),
+    ois_rates_(ois_rates),
+    settlement_days_(settlement_days)
+{
+    calendar_ = CalendarFactory::create(ccy_conv_.calendar_name);
+    day_count_ = DayCountFactory::create(ccy_conv_.day_count);
+}
+
+// OISCurveBuilder - legacy constructor for backwards compatibility
 OISCurveBuilder::OISCurveBuilder(
     const QuantLib::Date& eval_date,
     const CurrencyConfig& ccy_config,
     const std::vector<std::pair<std::string, double>>& ois_rates,
     QuantLib::Natural settlement_days
-) : eval_date_(eval_date),
-    ccy_config_(ccy_config),
-    ois_rates_(ois_rates),
-    settlement_days_(settlement_days)
+) : OISCurveBuilder(eval_date, ccy_config.to_currency_conventions(), ois_rates, settlement_days)
 {
-    calendar_ = CalendarFactory::create(ccy_config_.calendar_name);
-    day_count_ = DayCountFactory::create(ccy_config_.day_count);
 }
 
 QuantLib::Handle<QuantLib::YieldTermStructure> OISCurveBuilder::build() {
     std::vector<QuantLib::ext::shared_ptr<QuantLib::RateHelper>> helpers;
-    auto index = OISIndexFactory::create(ccy_config_.ois_index_name);
+    auto index = OISIndexFactory::create(ccy_conv_.ois_index_name);
 
     for (const auto& [tenor, rate] : ois_rates_) {
         auto quote = QuantLib::ext::make_shared<QuantLib::SimpleQuote>(rate);
@@ -164,26 +174,28 @@ QuantLib::Handle<QuantLib::YieldTermStructure> OISCurveBuilder::build() {
     return QuantLib::Handle<QuantLib::YieldTermStructure>(curve);
 }
 
-// XCCYCurveBuilder implementation
+// XCCYCurveBuilder implementation - new constructor with separated types
 XCCYCurveBuilder::XCCYCurveBuilder(
     const XCCYMarketData& market_data,
+    const XCCYConventions& conventions,
     const QuantLib::Handle<QuantLib::YieldTermStructure>& domestic_discount_curve,
     const QuantLib::Handle<QuantLib::YieldTermStructure>& domestic_index_curve,
     const QuantLib::Handle<QuantLib::YieldTermStructure>& foreign_index_curve
 ) : market_data_(market_data),
+    conventions_(conventions),
     domestic_discount_curve_(domestic_discount_curve),
     domestic_index_curve_(domestic_index_curve),
     foreign_index_curve_(foreign_index_curve),
-    settlement_days_(2)
+    settlement_days_(conventions.settlement_days)
 {
     setup_conventions();
 }
 
 void XCCYCurveBuilder::setup_conventions() {
-    domestic_calendar_ = CalendarFactory::create(market_data_.domestic_ccy.calendar_name);
-    foreign_calendar_ = CalendarFactory::create(market_data_.foreign_ccy.calendar_name);
+    domestic_calendar_ = CalendarFactory::create(conventions_.domestic.calendar_name);
+    foreign_calendar_ = CalendarFactory::create(conventions_.foreign.calendar_name);
     joint_calendar_ = QuantLib::JointCalendar(domestic_calendar_, foreign_calendar_);
-    foreign_day_count_ = DayCountFactory::create(market_data_.foreign_ccy.day_count);
+    foreign_day_count_ = DayCountFactory::create(conventions_.foreign.day_count);
     eval_date_ = market_data_.valuation_date;
     QuantLib::Settings::instance().evaluationDate() = eval_date_;
 }
@@ -235,29 +247,29 @@ QuantLib::Handle<QuantLib::YieldTermStructure> XCCYCurveBuilder::build() {
 
     // Create indices for XCCY swap helpers
     auto domestic_index = OISIndexFactory::create(
-        market_data_.domestic_ccy.ois_index_name,
+        conventions_.domestic.ois_index_name,
         domestic_index_curve_
     );
     auto foreign_index = OISIndexFactory::create(
-        market_data_.foreign_ccy.ois_index_name,
+        conventions_.foreign.ois_index_name,
         foreign_index_curve_
     );
 
-    // Get swap conventions from currency configs
-    const auto& foreign_ccy = market_data_.foreign_ccy;
-    const auto& domestic_ccy = market_data_.domestic_ccy;
+    // Get swap leg conventions from XCCYConventions
+    const auto& foreign_leg = conventions_.foreign_leg;
+    const auto& domestic_leg = conventions_.domestic_leg;
 
-    QuantLib::Period foreign_tenor = tenor_to_period(foreign_ccy.payment_tenor);
-    QuantLib::Period domestic_tenor = tenor_to_period(domestic_ccy.payment_tenor);
+    QuantLib::Period foreign_tenor = tenor_to_period(foreign_leg.payment_tenor);
+    QuantLib::Period domestic_tenor = tenor_to_period(domestic_leg.payment_tenor);
 
     // Optional lookback periods (ORE uses boost::optional)
     boost::optional<QuantLib::Period> foreign_lookback;
-    if (foreign_ccy.lookback.has_value()) {
-        foreign_lookback = tenor_to_period(foreign_ccy.lookback.value());
+    if (foreign_leg.lookback.has_value()) {
+        foreign_lookback = tenor_to_period(foreign_leg.lookback.value());
     }
     boost::optional<QuantLib::Period> domestic_lookback;
-    if (domestic_ccy.lookback.has_value()) {
-        domestic_lookback = tenor_to_period(domestic_ccy.lookback.value());
+    if (domestic_leg.lookback.has_value()) {
+        domestic_lookback = tenor_to_period(domestic_leg.lookback.value());
     }
 
     // Add cross-currency basis swap helpers for long end
@@ -290,18 +302,18 @@ QuantLib::Handle<QuantLib::YieldTermStructure> XCCYCurveBuilder::build() {
             true,                                // spreadOnForeignCcy
             foreign_tenor,                       // foreignTenor (payment frequency)
             domestic_tenor,                      // domesticTenor (payment frequency)
-            foreign_ccy.payment_lag,             // foreignPaymentLag
-            domestic_ccy.payment_lag,            // domesticPaymentLag
-            foreign_ccy.include_spread,          // foreignIncludeSpread
+            foreign_leg.payment_lag,             // foreignPaymentLag
+            domestic_leg.payment_lag,            // domesticPaymentLag
+            foreign_leg.include_spread,          // foreignIncludeSpread
             foreign_lookback,                    // foreignLookback
-            foreign_ccy.fixing_days,             // foreignFixingDays
-            foreign_ccy.rate_cutoff,             // foreignRateCutoff
-            foreign_ccy.is_averaged,             // foreignIsAveraged
-            domestic_ccy.include_spread,         // domesticIncludeSpread
+            foreign_leg.fixing_days,             // foreignFixingDays
+            foreign_leg.rate_cutoff,             // foreignRateCutoff
+            foreign_leg.is_averaged,             // foreignIsAveraged
+            domestic_leg.include_spread,         // domesticIncludeSpread
             domestic_lookback,                   // domesticLookback
-            domestic_ccy.fixing_days,            // domesticFixingDays
-            domestic_ccy.rate_cutoff,            // domesticRateCutoff
-            domestic_ccy.is_averaged,            // domesticIsAveraged
+            domestic_leg.fixing_days,            // domesticFixingDays
+            domestic_leg.rate_cutoff,            // domesticRateCutoff
+            domestic_leg.is_averaged,            // domesticIsAveraged
             false,                               // telescopicValueDates
             QuantLib::Pillar::LastRelevantDate   // pillarChoice
         );
@@ -356,8 +368,8 @@ void XCCYCurveBuilder::print_curve_summary() const {
     std::cout << std::string(70, '=') << "\n";
     std::cout << "Valuation Date: " << market_data_.valuation_date << "\n";
     std::cout << std::fixed << std::setprecision(4) << "FX Spot: " << market_data_.fx_spot << "\n";
-    std::cout << "Domestic: " << domestic_ccy() << " (" << market_data_.domestic_ccy.ois_index_name << ")\n";
-    std::cout << "Foreign: " << foreign_ccy() << " (" << market_data_.foreign_ccy.ois_index_name << ")\n";
+    std::cout << "Domestic: " << domestic_ccy() << " (" << conventions_.domestic.ois_index_name << ")\n";
+    std::cout << "Foreign: " << foreign_ccy() << " (" << conventions_.foreign.ois_index_name << ")\n";
 
     std::vector<std::string> tenors = {"1M", "3M", "6M", "1Y", "2Y", "3Y", "5Y", "7Y", "10Y", "20Y", "30Y"};
 
@@ -400,6 +412,7 @@ void XCCYCurveBuilder::print_curve_summary() const {
 // Convenience function
 std::map<std::string, QuantLib::Handle<QuantLib::YieldTermStructure>> build_xccy_curve(
     const XCCYMarketData& market_data,
+    const XCCYConventions& conventions,
     const QuantLib::Handle<QuantLib::YieldTermStructure>& domestic_discount_curve,
     const QuantLib::Handle<QuantLib::YieldTermStructure>& domestic_index_curve,
     const QuantLib::Handle<QuantLib::YieldTermStructure>& foreign_index_curve
@@ -408,6 +421,7 @@ std::map<std::string, QuantLib::Handle<QuantLib::YieldTermStructure>> build_xccy
 
     XCCYCurveBuilder builder(
         market_data,
+        conventions,
         domestic_discount_curve,
         domestic_index_curve,
         foreign_index_curve

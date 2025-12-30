@@ -58,6 +58,15 @@ public:
  */
 class OISCurveBuilder {
 public:
+    // New constructor with separated types
+    OISCurveBuilder(
+        const QuantLib::Date& eval_date,
+        const CurrencyConventions& ccy_conv,
+        const std::vector<std::pair<std::string, double>>& ois_rates,
+        QuantLib::Natural settlement_days = 2
+    );
+
+    // Legacy constructor for backwards compatibility
     OISCurveBuilder(
         const QuantLib::Date& eval_date,
         const CurrencyConfig& ccy_config,
@@ -69,7 +78,7 @@ public:
 
 private:
     QuantLib::Date eval_date_;
-    CurrencyConfig ccy_config_;
+    CurrencyConventions ccy_conv_;
     std::vector<std::pair<std::string, double>> ois_rates_;
     QuantLib::Natural settlement_days_;
     QuantLib::Calendar calendar_;
@@ -91,11 +100,19 @@ private:
  * - Rate cutoff
  * - Include spread flag
  * - Is averaged flag
+ *
+ * New API: Accepts market data and conventions separately.
+ * Legacy API: Also supports combined XCCYMarketData for backwards compatibility.
  */
 class XCCYCurveBuilder {
 public:
+    /**
+     * New constructor: Market data and conventions separated.
+     * This is the preferred API for new code.
+     */
     XCCYCurveBuilder(
         const XCCYMarketData& market_data,
+        const XCCYConventions& conventions,
         const QuantLib::Handle<QuantLib::YieldTermStructure>& domestic_discount_curve,
         const QuantLib::Handle<QuantLib::YieldTermStructure>& domestic_index_curve,
         const QuantLib::Handle<QuantLib::YieldTermStructure>& foreign_index_curve
@@ -109,12 +126,14 @@ public:
 
     // Accessors
     std::string ccy_pair() const { return market_data_.ccy_pair(); }
-    std::string domestic_ccy() const { return market_data_.domestic_ccy.ccy; }
-    std::string foreign_ccy() const { return market_data_.foreign_ccy.ccy; }
+    std::string domestic_ccy() const { return market_data_.domestic_ccy; }
+    std::string foreign_ccy() const { return market_data_.foreign_ccy; }
 
     QuantLib::Handle<QuantLib::YieldTermStructure> foreign_xccy_curve() const {
         return foreign_xccy_curve_;
     }
+
+    const XCCYConventions& conventions() const { return conventions_; }
 
     /**
      * Get discount factor from the XCCY curve.
@@ -145,6 +164,7 @@ private:
     QuantLib::Period tenor_to_period(const std::string& tenor) const;
 
     XCCYMarketData market_data_;
+    XCCYConventions conventions_;
     QuantLib::Handle<QuantLib::YieldTermStructure> domestic_discount_curve_;
     QuantLib::Handle<QuantLib::YieldTermStructure> domestic_index_curve_;
     QuantLib::Handle<QuantLib::YieldTermStructure> foreign_index_curve_;
@@ -161,7 +181,7 @@ private:
 };
 
 /**
- * Build XCCY curves from market data and pre-built input curves.
+ * Build XCCY curves from market data, conventions, and pre-built input curves.
  *
  * Returns a map with curve handles:
  * - "domestic_discount": Domestic discount curve (pass-through)
@@ -171,6 +191,7 @@ private:
  */
 std::map<std::string, QuantLib::Handle<QuantLib::YieldTermStructure>> build_xccy_curve(
     const XCCYMarketData& market_data,
+    const XCCYConventions& conventions,
     const QuantLib::Handle<QuantLib::YieldTermStructure>& domestic_discount_curve,
     const QuantLib::Handle<QuantLib::YieldTermStructure>& domestic_index_curve,
     const QuantLib::Handle<QuantLib::YieldTermStructure>& foreign_index_curve

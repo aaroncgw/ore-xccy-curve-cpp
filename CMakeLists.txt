@@ -73,6 +73,33 @@ target_link_libraries(ore_xccy_curve
 add_executable(xccy_curve_example examples/main.cpp)
 target_link_libraries(xccy_curve_example PRIVATE ore_xccy_curve)
 
+# Python bindings (optional)
+option(BUILD_PYTHON_BINDINGS "Build Python bindings using pybind11" ON)
+
+if(BUILD_PYTHON_BINDINGS)
+    find_package(pybind11 CONFIG QUIET)
+
+    if(NOT pybind11_FOUND)
+        # Try to fetch pybind11 if not found
+        include(FetchContent)
+        FetchContent_Declare(
+            pybind11
+            GIT_REPOSITORY https://github.com/pybind/pybind11.git
+            GIT_TAG v2.11.1
+        )
+        FetchContent_MakeAvailable(pybind11)
+    endif()
+
+    pybind11_add_module(ore_xccy_curve_cpp python/bindings.cpp)
+    target_link_libraries(ore_xccy_curve_cpp PRIVATE ore_xccy_curve)
+
+    # Install Python module
+    install(TARGETS ore_xccy_curve_cpp
+        LIBRARY DESTINATION ${Python_SITEARCH}
+        COMPONENT python
+    )
+endif()
+
 # Installation
 install(TARGETS ore_xccy_curve
     LIBRARY DESTINATION lib
