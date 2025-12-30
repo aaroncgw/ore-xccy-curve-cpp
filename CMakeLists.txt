@@ -5,42 +5,104 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Get paths from environment variables
+if(DEFINED ENV{ORE_ROOT} AND NOT ORE_ROOT)
+    set(ORE_ROOT "$ENV{ORE_ROOT}" CACHE PATH "Path to ORE installation")
+endif()
+if(DEFINED ENV{QUANTLIB_ROOT} AND NOT QUANTLIB_ROOT)
+    set(QUANTLIB_ROOT "$ENV{QUANTLIB_ROOT}" CACHE PATH "Path to QuantLib installation")
+endif()
+if(DEFINED ENV{BOOST_ROOT} AND NOT BOOST_ROOT)
+    set(BOOST_ROOT "$ENV{BOOST_ROOT}" CACHE PATH "Path to Boost installation")
+endif()
+
 # Find Boost (required by QuantLib and ORE)
 find_package(Boost REQUIRED)
 
-# Find QuantLib and ORE
-# Adjust these paths based on your installation
-find_package(QuantLib REQUIRED)
-find_package(ORE QUIET)
+# Try to find QuantLib via CMake config first
+find_package(QuantLib QUIET)
 
-# If ORE is not found via find_package, try to locate it manually
-if(NOT ORE_FOUND)
-    # Try environment variable first, then cache variable
-    if(DEFINED ENV{ORE_ROOT} AND NOT ORE_ROOT)
-        set(ORE_ROOT "$ENV{ORE_ROOT}" CACHE PATH "Path to ORE installation")
+if(NOT QuantLib_FOUND)
+    message(STATUS "QuantLib CMake config not found, searching manually...")
+
+    # Search paths for QuantLib
+    set(QUANTLIB_SEARCH_PATHS
+        ${QUANTLIB_ROOT}
+        ${ORE_ROOT}
+        "C:/QuantLib"
+        "C:/local/QuantLib"
+        "/usr/local"
+        "/opt/QuantLib"
+    )
+
+    # Find QuantLib include directory
+    find_path(QUANTLIB_INCLUDE_DIR
+        NAMES ql/quantlib.hpp
+        PATHS ${QUANTLIB_SEARCH_PATHS}
+        PATH_SUFFIXES include
+    )
+
+    # Find QuantLib library
+    find_library(QUANTLIB_LIBRARY
+        NAMES QuantLib QuantLib-x64-mt QuantLib-vc143-x64-mt
+        PATHS ${QUANTLIB_SEARCH_PATHS}
+        PATH_SUFFIXES lib lib64
+    )
+
+    if(QUANTLIB_INCLUDE_DIR AND QUANTLIB_LIBRARY)
+        message(STATUS "Found QuantLib: ${QUANTLIB_LIBRARY}")
+        message(STATUS "QuantLib include: ${QUANTLIB_INCLUDE_DIR}")
+        set(QUANTLIB_FOUND TRUE)
     else()
-        set(ORE_ROOT "" CACHE PATH "Path to ORE installation")
+        message(FATAL_ERROR "QuantLib not found. Set QUANTLIB_ROOT or ORE_ROOT environment variable.")
     endif()
+endif()
 
-    if(ORE_ROOT)
-        set(ORE_INCLUDE_DIRS "${ORE_ROOT}/include")
-        set(ORE_LIBRARY_DIRS "${ORE_ROOT}/lib")
+# Find ORE libraries
+message(STATUS "Searching for ORE libraries...")
 
-        find_library(QUANTEXT_LIBRARY
-            NAMES QuantExt
-            PATHS ${ORE_LIBRARY_DIRS}
-        )
-        find_library(OREDATA_LIBRARY
-            NAMES OREData
-            PATHS ${ORE_LIBRARY_DIRS}
-        )
-        find_library(OREANALYTICS_LIBRARY
-            NAMES OREAnalytics
-            PATHS ${ORE_LIBRARY_DIRS}
-        )
+set(ORE_SEARCH_PATHS
+    ${ORE_ROOT}
+    "C:/ORE"
+    "C:/local/ORE"
+    "/usr/local"
+    "/opt/ORE"
+)
 
-        set(ORE_LIBRARIES ${QUANTEXT_LIBRARY} ${OREDATA_LIBRARY} ${OREANALYTICS_LIBRARY})
-    endif()
+# Find ORE include directory
+find_path(ORE_INCLUDE_DIR
+    NAMES qle/version.hpp ored/version.hpp
+    PATHS ${ORE_SEARCH_PATHS}
+    PATH_SUFFIXES include
+)
+
+# Find ORE libraries
+find_library(QUANTEXT_LIBRARY
+    NAMES QuantExt QuantExt-x64-mt
+    PATHS ${ORE_SEARCH_PATHS}
+    PATH_SUFFIXES lib lib64
+)
+find_library(OREDATA_LIBRARY
+    NAMES OREData OREData-x64-mt
+    PATHS ${ORE_SEARCH_PATHS}
+    PATH_SUFFIXES lib lib64
+)
+find_library(OREANALYTICS_LIBRARY
+    NAMES OREAnalytics OREAnalytics-x64-mt
+    PATHS ${ORE_SEARCH_PATHS}
+    PATH_SUFFIXES lib lib64
+)
+
+if(ORE_INCLUDE_DIR AND QUANTEXT_LIBRARY)
+    message(STATUS "Found ORE: ${ORE_INCLUDE_DIR}")
+    message(STATUS "  QuantExt: ${QUANTEXT_LIBRARY}")
+    message(STATUS "  OREData: ${OREDATA_LIBRARY}")
+    message(STATUS "  OREAnalytics: ${OREANALYTICS_LIBRARY}")
+    set(ORE_FOUND TRUE)
+    set(ORE_INCLUDE_DIRS ${ORE_INCLUDE_DIR})
+    set(ORE_LIBRARIES ${QUANTEXT_LIBRARY} ${OREDATA_LIBRARY} ${OREANALYTICS_LIBRARY})
+else()
+    message(FATAL_ERROR "ORE not found. Set ORE_ROOT environment variable.")
 endif()
 
 # Library sources
@@ -64,14 +126,25 @@ target_include_directories(ore_xccy_curve
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
         ${ORE_INCLUDE_DIRS}
+        ${QUANTLIB_INCLUDE_DIR}
 )
 
-target_link_libraries(ore_xccy_curve
-    PUBLIC
-        Boost::boost
-        QuantLib::QuantLib
-        ${ORE_LIBRARIES}
-)
+# Link libraries - use CMake target if available, otherwise use found library
+if(TARGET QuantLib::QuantLib)
+    target_link_libraries(ore_xccy_curve
+        PUBLIC
+            Boost::boost
+            QuantLib::QuantLib
+            ${ORE_LIBRARIES}
+    )
+else()
+    target_link_libraries(ore_xccy_curve
+        PUBLIC
+            Boost::boost
+            ${QUANTLIB_LIBRARY}
+            ${ORE_LIBRARIES}
+    )
+endif()
 
 # Example executable
 add_executable(xccy_curve_example examples/main.cpp)
