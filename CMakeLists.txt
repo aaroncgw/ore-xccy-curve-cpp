@@ -15,8 +15,12 @@ find_package(ORE QUIET)
 
 # If ORE is not found via find_package, try to locate it manually
 if(NOT ORE_FOUND)
-    # Common installation paths
-    set(ORE_ROOT "" CACHE PATH "Path to ORE installation")
+    # Try environment variable first, then cache variable
+    if(DEFINED ENV{ORE_ROOT} AND NOT ORE_ROOT)
+        set(ORE_ROOT "$ENV{ORE_ROOT}" CACHE PATH "Path to ORE installation")
+    else()
+        set(ORE_ROOT "" CACHE PATH "Path to ORE installation")
+    endif()
 
     if(ORE_ROOT)
         set(ORE_INCLUDE_DIRS "${ORE_ROOT}/include")
@@ -90,12 +94,12 @@ if(BUILD_PYTHON_BINDINGS)
         FetchContent_MakeAvailable(pybind11)
     endif()
 
-    pybind11_add_module(ore_xccy_curve_cpp python/bindings.cpp)
-    target_link_libraries(ore_xccy_curve_cpp PRIVATE ore_xccy_curve)
+    pybind11_add_module(_core ore_xccy_curve_cpp/bindings.cpp)
+    target_link_libraries(_core PRIVATE ore_xccy_curve)
 
-    # Install Python module
-    install(TARGETS ore_xccy_curve_cpp
-        LIBRARY DESTINATION ${Python_SITEARCH}
+    # Install Python module to package directory
+    install(TARGETS _core
+        LIBRARY DESTINATION ore_xccy_curve_cpp
         COMPONENT python
     )
 endif()

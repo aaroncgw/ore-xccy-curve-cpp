@@ -20,16 +20,15 @@ from datetime import date
 from typing import Dict, List, Optional, Tuple
 
 try:
-    import ore_xccy_curve_cpp as cpp
+    from . import _core as cpp
 except ImportError:
     raise ImportError(
-        "ore_xccy_curve_cpp module not found. Please build and install it:\n"
-        "  cd ore-xccy-curve-cpp\n"
-        "  pip install .\n"
+        "ore_xccy_curve_cpp C++ module not found. Please build and install with:\n"
+        "  uv pip install c:\\projects\\ore-xccy-curve-cpp\n"
         "Or build with CMake:\n"
         "  mkdir build && cd build\n"
         "  cmake .. -DBUILD_PYTHON_BINDINGS=ON\n"
-        "  make"
+        "  cmake --build ."
     )
 
 

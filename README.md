@@ -127,8 +127,8 @@ conventions = XCCYConventionsCpp(
 
 # 3. Create input curves (flat curves for demo)
 val_date = date(2024, 1, 15)
-usd_curve = create_flat_curve(val_date.year, val_date.month, val_date.day, 0.0525)
-gbp_curve = create_flat_curve(val_date.year, val_date.month, val_date.day, 0.0475)
+usd_curve = create_flat_curve(val_date, 0.0525)  # 5.25% SOFR
+gbp_curve = create_flat_curve(val_date, 0.0475)  # 4.75% SONIA
 
 # 4. Build XCCY curve
 builder = XCCYCurveBuilderCpp(
